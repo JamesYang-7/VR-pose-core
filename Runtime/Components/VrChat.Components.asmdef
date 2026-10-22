@@ -1,0 +1,29 @@
+{
+    "name": "VrChat.Components",
+    "rootNamespace": "",
+    "references": [
+        "VrChat.Runtime",
+        "VrChat.Audio2Face",
+        "Unity.InferenceEngine",
+        "Unity.InputSystem",
+        "Unity.XR.Management"
+    ],
+    "includePlatforms": [
+        "Editor",
+        "WindowsStandalone64"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.multiplayer.playmode",
+            "expression": "0.0.0",
+            "define": "VRCHAT_MPPM"
+        }
+    ],
+    "noEngineReferences": false
+}

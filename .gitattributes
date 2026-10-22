@@ -1,0 +1,15 @@
+# Auto-detect text files and normalize line endings.
+* text=auto
+
+*.cs     text diff=csharp
+*.asmdef text
+*.json   text
+*.md     text
+*.py     text
+*.txt    text
+*.h      text
+*.cpp    text
+
+# Unity YAML-serialized files: text, but DON'T normalize line endings.
+*.meta  -text
+*.asset -text

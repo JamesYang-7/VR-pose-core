@@ -1,0 +1,17 @@
+# Model files (Models/<export>/, e.g. rpm/): each version's ONNX graph and
+# reference output in models/<name>/output_ref/, and the captures in data/, are
+# git-ignored with their .meta files and travel in the projects' local-files zip.
+# The READMEs, each version's manifest.json and Models/model_fingerprint.txt
+# (Tools~/model_fingerprint.py) stay tracked, so ModelFingerprintTests can tell
+# whether the local models match the commit.
+/Models/*/models/*/*.onnx
+/Models/*/models/*/*.onnx.meta
+/Models/*/models/*/output_ref/
+/Models/*/models/*/output_ref.meta
+/Models/*/data/
+/Models/*/data.meta
+
+# Audio2Face native plugin build tree (Tools~/audio2face_plugin.py build).
+/Native~/Audio2FacePlugin/build/
+
+__pycache__/
