@@ -51,6 +51,19 @@ namespace VrChat
         }
 
         /// <summary>
+        /// The Unity world rotation of a rig joint whose global SMPL rotation (row-major 3×3, column vectors, as
+        /// <see cref="GorpDevice.ToSmpl"/> writes it) is <paramref name="rotation"/>, on a rig whose root bone
+        /// (<c>pelvis.parent</c>) has world rotation <paramref name="rigRoot"/>: rigRoot · the Z-up → Y-up fix · F·R·F,
+        /// what <see cref="Apply"/> composes down the chain to that joint. A level headset looking along +z gives the
+        /// rig's rest head rotation (identity under an unturned root).
+        /// </summary>
+        public static Quaternion WorldRotation(double[] rotation, Quaternion rigRoot) =>
+            rigRoot * AnimUtils.pelvisCorrection * FromColumns(
+                new Vector3((float)rotation[0], (float)rotation[3], (float)rotation[6]),
+                new Vector3((float)rotation[1], (float)rotation[4], (float)rotation[7]),
+                new Vector3((float)rotation[2], (float)rotation[5], (float)rotation[8]));
+
+        /// <summary>
         /// Poses <paramref name="bones"/> with <paramref name="localRotations"/> (from the methods above) and
         /// translates the rig's root bone (<c>pelvis.parent</c>) so the pelvis lands on
         /// <paramref name="pelvisWorld"/> (Unity world).

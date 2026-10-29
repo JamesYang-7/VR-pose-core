@@ -53,6 +53,25 @@ namespace VrChat.Testing
             Assert.That(Quaternion.Angle(actual[5], expected[5]), Is.LessThan(1e-2f));
         }
 
+        // GORP's conversion makes the headset the head joint's frame, and the SMPL-X rig's rest head is level and
+        // looks along +z: so the head joint's world rotation is the headset's.
+        [TestCase(0f, 0f, 0f)]
+        [TestCase(0f, 90f, 0f)]
+        [TestCase(20f, 45f, -10f)]
+        public void WorldRotation_HeadJointOfAHeadsetUnderAnUnturnedRoot_IsTheHeadsetRotation(float x, float y, float z)
+        {
+            var headset = Quaternion.Euler(x, y, z);
+            var raw = new float[GorpDevice.RawWidth];
+            GorpDevice.FromUnity(new Vector3(0f, 1.7f, 0f), headset, 1f, raw, 0);
+            var position = new double[3];
+            var rotation = new double[9];
+            GorpDevice.ToSmpl(raw, 0, GorpDevice.Head, position, rotation);
+
+            var actual = GorpPose.WorldRotation(rotation, Quaternion.identity);
+
+            Assert.That(Quaternion.Angle(actual, headset), Is.LessThan(0.01f));
+        }
+
         [Test]
         public void Apply_GroundTruthFrameOfS26_PointsEveryBoneAlongTheRowsJointPositions()
         {

@@ -7,6 +7,10 @@ controllers in, a 22-joint SMPL body out), shared by the projects built on it.
   al., CVPR 2025) behind `IPoseStepRunner`, run live by `RpmLiveWorker` on the `PoseLiveWorker` base. A project can
   add its own model the same way: a runner, a `PoseLiveWorker` subclass and a `ModelExport` for its files.
   `PoseLayout` holds the input frame and motion row layouts they share.
+- **IK only**: `IkLiveWorker` poses the same body with no model, no model files and no GPU work (`Runtime/Ik/`:
+  `IkBody`, the closed-form `TwoBoneIk`, `SpineLean`): eyes on the headset, wrists on the controllers, the upper body
+  bent to reach them, the legs straight. Both workers share the `LiveWorker` base (the tracked transforms, the avatar,
+  the grip conventions), so whatever places or re-poses that body works with either.
 - **Device input**: `GorpDevice` and `GorpInputProcessor` turn headset and controller poses into model frames;
   XR input from the live rig, a recording (`RecordedXrInput`, `VrInputRecorder`), a simulation or a GORP capture.
 - **Conversions and data**: SMPL (Z-up) ↔ Unity (`MathUtils`, `GorpPose`), `.npy` / `.npz` readers and writer.
@@ -62,9 +66,9 @@ when the local files, or the code's model settings, don't match it. After instal
 
 | Path | What |
 |---|---|
-| `Runtime/` | `VrChat.Runtime`: the step runners, input processing, conversions, IO, calibration, lip sync (`LipSync/`) and retargeting (`Retarget/`) |
+| `Runtime/` | `VrChat.Runtime`: the step runners, input processing, conversions, IO, calibration, lip sync (`LipSync/`), retargeting (`Retarget/`) and IK (`Ik/`) |
 | `Runtime/Audio2Face/` | `VrChat.Audio2Face`: the plugin's P/Invoke wrapper, `Audio2FaceDriver` and its pure parts |
-| `Runtime/Components/` | `VrChat.Components`: the MonoBehaviours scenes use (live workers, XR input, recorder, debug views, HUD, `XrAutoStart`) |
+| `Runtime/Components/` | `VrChat.Components`: the MonoBehaviours scenes use (live workers, model and IK, XR input, recorder, debug views, HUD, `XrAutoStart`) |
 | `Editor/` | `VrChat.Editor`: the GORP clip baker, `RetargetFit`, the viseme and mouth-interior tools |
 | `Tests/Editor/` | `VrChat.EditModeTests`: EditMode tests; the model tests skip when the model files are missing |
 | `Models/` | The model exports (above) |

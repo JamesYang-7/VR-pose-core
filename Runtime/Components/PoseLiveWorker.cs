@@ -5,9 +5,9 @@ using UnityEngine.XR;
 using VrChat;
 
 /// <summary>
-/// The live pipeline shared by the pose models (e.g. <see cref="RpmLiveWorker"/>): head +
-/// two controller poses in, the 22-joint SMPL-X avatar out. A subclass supplies the model's step loop
-/// (<see cref="IPoseStepRunner"/>), its input rule and its frame rate.
+/// The live pipeline shared by the pose models (e.g. <see cref="RpmLiveWorker"/>), the <see cref="LiveWorker"/> that
+/// runs a network: head + two controller poses in, the 22-joint SMPL-X avatar out. A subclass supplies the model's
+/// step loop (<see cref="IPoseStepRunner"/>), its input rule and its frame rate.
 ///
 /// <para>The model runs at its own rate (30 fps), whatever the display rate. On that clock this samples the
 /// tracked poses (interpolated to the tick between the last two rendered frames), converts them to GORP's
@@ -26,48 +26,8 @@ using VrChat;
 /// (<see cref="GorpPose.RestJoints"/>), and the rollout starts from the model's standing seed. The tracking origin
 /// must be the floor: the models read absolute height.</para>
 /// </summary>
-public abstract class PoseLiveWorker : MonoBehaviour
+public abstract class PoseLiveWorker : LiveWorker
 {
-    /// <summary>HMD / head transform (the XR Origin Main Camera).</summary>
-    [field: SerializeField]
-    [field: Tooltip("HMD / head transform (XR Origin Main Camera).")]
-    public Transform Head { get; set; }
-
-    /// <summary>Left controller transform.</summary>
-    [field: SerializeField]
-    [field: Tooltip("Left controller transform.")]
-    public Transform LeftController { get; set; }
-
-    /// <summary>Right controller transform.</summary>
-    [field: SerializeField]
-    [field: Tooltip("Right controller transform.")]
-    public Transform RightController { get; set; }
-
-    /// <summary>Root GameObject of the SMPL-X avatar (must contain the named SMPL bones).</summary>
-    [field: SerializeField]
-    [field: Tooltip("Root of the SMPL-X avatar (contains the named SMPL bones).")]
-    public Transform AvatarRoot { get; set; }
-
-    /// <summary>Left controller position offset (m, the controller's own axes), applied before the rotation correction.</summary>
-    [field: SerializeField]
-    [field: Tooltip("Left controller → GORP's controller point, in metres along the controller's own axes, applied before the rotation correction. Default: Meta's grip → old pose translation (GorpDevice.GripOffset), for the OpenXR grip pose.")]
-    public Vector3 LeftGripOffset { get; set; } = GorpDevice.GripOffset;
-
-    /// <summary>Right controller position offset (m, the controller's own axes), applied before the rotation correction.</summary>
-    [field: SerializeField]
-    [field: Tooltip("Right controller → GORP's controller point, as for the left. Default: GorpDevice.GripOffset.")]
-    public Vector3 RightGripOffset { get; set; } = GorpDevice.GripOffset;
-
-    /// <summary>Left controller rotation correction (Euler), applied as rotation * Euler before conversion.</summary>
-    [field: SerializeField]
-    [field: Tooltip("Left controller → GORP's controller frame, applied as rotation * Euler. Default (60,0,0): Meta's grip → old pose turn (GorpDevice.GripCorrectionEuler), for the OpenXR grip pose; Quest wrist pivots measured 43–58°.")]
-    public Vector3 LeftGripCorrectionEuler { get; set; } = GorpDevice.GripCorrectionEuler;
-
-    /// <summary>Right controller rotation correction (Euler), applied as rotation * Euler before conversion.</summary>
-    [field: SerializeField]
-    [field: Tooltip("Right controller → GORP's controller frame, applied as rotation * Euler. Default (60,0,0), as for the left.")]
-    public Vector3 RightGripCorrectionEuler { get; set; } = GorpDevice.GripCorrectionEuler;
-
     /// <summary>Start the rollout immediately instead of waiting for the trigger (handy for replay).</summary>
     [field: SerializeField]
     [field: Tooltip("Start immediately instead of waiting for the right-trigger / start key.")]
@@ -87,6 +47,12 @@ public abstract class PoseLiveWorker : MonoBehaviour
     [field: SerializeField]
     [field: Tooltip("Blend between the model's last two poses every rendered frame: smooth at any display rate, one model frame (33 ms) later. Off: each pose shows as it arrives (30 Hz steps).")]
     public bool SmoothPose { get; set; } = true;
+
+    /// <inheritdoc/>
+    public override bool HasPose => _hasPose;
+
+    /// <inheritdoc/>
+    public override bool PinsWrists => PinWristsToControllers;
 
     /// <summary>Model frames committed so far (0 before the rollout starts).</summary>
     public int CommittedFrames => _runner?.StepCount ?? 0;
@@ -117,7 +83,6 @@ public abstract class PoseLiveWorker : MonoBehaviour
     IPoseStepRunner _runner;
     GorpInputProcessor _input;
     readonly float[] _raw = new float[GorpDevice.Points * GorpDevice.RawWidth];
-    readonly float[] _wristRaw = new float[GorpDevice.RawWidth];
     readonly float[] _frame = new float[PoseLayout.InputWidth];
 
     // Device poses of the previous rendered frame, for resampling to the model's tick.
@@ -131,10 +96,6 @@ public abstract class PoseLiveWorker : MonoBehaviour
     Vector3 _fromPelvis, _toPelvis, _shownPelvis;
     float _poseAge;
     bool _hasPose;
-
-    // Scratch for the live wrist estimates.
-    readonly double[] _jointPos = new double[3];
-    readonly double[] _jointRot = new double[9];
 
     void Start()
     {
@@ -191,10 +152,8 @@ public abstract class PoseLiveWorker : MonoBehaviour
     void AdvanceClock()
     {
         var head = new Pose(Head.position, Head.rotation);
-        var left = GorpDevice.FromGrip(new Pose(LeftController.position, LeftController.rotation),
-            LeftGripOffset, Quaternion.Euler(LeftGripCorrectionEuler));
-        var right = GorpDevice.FromGrip(new Pose(RightController.position, RightController.rotation),
-            RightGripOffset, Quaternion.Euler(RightGripCorrectionEuler));
+        var left = GorpControllerPose(LeftController, GorpDevice.Left);
+        var right = GorpControllerPose(RightController, GorpDevice.Right);
         if (!_hasLastPoses)
         {
             _lastPoses[0] = head; _lastPoses[1] = left; _lastPoses[2] = right;
@@ -272,17 +231,9 @@ public abstract class PoseLiveWorker : MonoBehaviour
 
         if (PinWristsToControllers)
         {
-            AnimUtils.SolveTwoBoneIK(_bones[16], _bones[18], _bones[kLeftWrist], WristEstimate(_lastPoses[1], GorpDevice.Left));
-            AnimUtils.SolveTwoBoneIK(_bones[17], _bones[19], _bones[kRightWrist], WristEstimate(_lastPoses[2], GorpDevice.Right));
+            AnimUtils.SolveTwoBoneIK(_bones[16], _bones[18], _bones[kLeftWrist], WristEstimate(LeftController, GorpDevice.Left));
+            AnimUtils.SolveTwoBoneIK(_bones[17], _bones[19], _bones[kRightWrist], WristEstimate(RightController, GorpDevice.Right));
         }
-    }
-
-    // Where GORP's conversion puts the wrist joint for this controller pose (controller minus its offset), in Unity.
-    Vector3 WristEstimate(Pose controller, int device)
-    {
-        GorpDevice.FromUnity(controller.position, controller.rotation, 1f, _wristRaw, 0);
-        GorpDevice.ToSmpl(_wristRaw, 0, device, _jointPos, _jointRot);
-        return GorpPose.ToUnity(new Vector3((float)_jointPos[0], (float)_jointPos[1], (float)_jointPos[2]));
     }
 
     static Pose Lerp(Pose a, Pose b, float t) =>

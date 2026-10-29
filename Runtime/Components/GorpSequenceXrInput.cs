@@ -5,7 +5,7 @@ using VrChat;
 /// <summary>
 /// Replays a GORP reference capture's raw device stream (<c>sparse_raw</c> in
 /// <c>Models/rpm/data/gorp/*.npz</c>, RPM-README §6) into the head and controller transforms, as a
-/// headset would deliver them, so a live worker (<see cref="PoseLiveWorker"/>) runs on a real GORP capture without a headset.
+/// headset would deliver them, so a live worker (<see cref="LiveWorker"/>: a pose model or IK) runs on a real GORP capture without a headset.
 /// Sibling of <see cref="RecordedXrInput"/>, which replays our own recordings; writes in <c>Update</c> so the
 /// poses are set before the worker's <c>LateUpdate</c> reads them.
 ///
@@ -36,8 +36,8 @@ public sealed class GorpSequenceXrInput : MonoBehaviour
 
     /// <summary>The worker these poses feed; its grip offsets and corrections are taken off the controllers.</summary>
     [field: SerializeField]
-    [field: Tooltip("The live worker (a PoseLiveWorker, e.g. RpmLiveWorker) these poses feed. Its grip offsets and corrections are taken off the controllers, so it gets back the capture's raw poses. Empty: none taken off.")]
-    public PoseLiveWorker Worker { get; set; }
+    [field: Tooltip("The live worker (e.g. RpmLiveWorker or IkLiveWorker) these poses feed. Its grip offsets and corrections are taken off the controllers, so it gets back the capture's raw poses. Empty: none taken off.")]
+    public LiveWorker Worker { get; set; }
 
     /// <summary>If set, the recentred capture is placed relative to this transform; null = about the world origin.</summary>
     [field: SerializeField] public Transform RootTransform { get; set; }

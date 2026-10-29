@@ -45,6 +45,26 @@ normalised rotation state the graph returns and `RpmStepRunner` feeds back uncha
 canonicalisation. Outputs: `motion_out` (198 floats: 22×6D rotations, local except the root, then 22 world joint
 positions, `PoseLayout.MotionWidth`) and `joint_rotmat`.
 
+### Live workers: model or IK
+
+`LiveWorker` (`Runtime/Components/`) is what a scene's live body hangs on: the head and controller transforms, the
+avatar, the grip offsets and corrections, `HasPose`, and the controllers' wrist estimates. Two kinds extend it:
+- `PoseLiveWorker` (and `RpmLiveWorker` on it) runs a model on its 30 Hz clock (the pattern above).
+- `IkLiveWorker` solves the body by IK alone every rendered frame, with `IkBody` (`Runtime/Ik/`).
+
+Both put the eyes on the headset and the wrists on the controllers, so scripts that place or re-pose the body (a
+mirror, a seat, a retargeter) should take a `LiveWorker`.
+
+`IkBody` starts from the rest pose each frame; the legs stay straight. The heading follows the head past a dead zone.
+The pelvis keeps its first-frame height and follows the eyes past a radius. `SpineLean` (weighted shares) leans the
+spine to the eyes. Each collar shrugs on long reaches. `TwoBoneIk` (closed form, about the rest hinge) bends each
+elbow down and back. The head and wrists take the rotations GORP's conversion gives (`GorpPose.WorldRotation`). Why
+not cyclic coordinate descent for the arms (`AnimUtils.SolveTwoBoneIK`, which the model worker pins with): it keeps
+the bend of the pose it starts from, and IK starts from rest.
+
+The wrist rotation that conversion gives is nominal. On GORP's captures it is 20–70° from the mocap wrist, depending
+on the grip.
+
 ### Conversions and the skeleton
 
 `Runtime/MathUtils.cs` (namespace `MyUtils`) is the coordinate glue. Training data is in Blender/SMPL axes (Z-up,
