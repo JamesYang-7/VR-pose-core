@@ -30,20 +30,33 @@ namespace VrChat.Retarget
         [field: Tooltip("Disable the SMPL avatar's renderers so only the target shows. Turn off to compare side by side.")]
         public bool HideSourceMeshes { get; set; } = true;
 
-        /// <summary>Place the target so its eyes land on the source's eyes.</summary>
+        /// <summary>Which point of the target is moved onto the source's each frame.</summary>
         [field: SerializeField]
-        [field: Tooltip("Move the target's hips so its eyes land on the source's eyes (the headset). Falls back to head joint on head joint if a rig has no eye bones. Off = target stays where its own transforms put it.")]
-        public bool AnchorEyes { get; set; } = true;
+        [field: Tooltip("Where the target goes each frame: its hips move so this point lands on the source's. Eyes: on the source's eyes (the headset), for the wearer's own body; head joint on head joint if a rig has no eye bones. Hips: the hip joints on the source's, for a body seen from outside (a bot), which keeps the source's seat, and its feet when its legs are as long, with its eyes where its own torso puts them. None: the target stays where its own transforms put it.")]
+        public RetargetAnchor AnchorAt { get; set; } = RetargetAnchor.Eyes;
+
+        /// <summary>Place the target so its eyes land on the source's eyes.</summary>
+        [Obsolete("Use AnchorAt: true is RetargetAnchor.Eyes (or keeps another anchor), false is RetargetAnchor.None.")]
+        public bool AnchorEyes
+        {
+            get => AnchorAt != RetargetAnchor.None;
+            set => AnchorAt = !value ? RetargetAnchor.None : AnchorAt == RetargetAnchor.None ? RetargetAnchor.Eyes : AnchorAt;
+        }
 
         /// <summary>Limbs re-aimed along SMPL's rest directions (read in Start).</summary>
         [field: SerializeField]
         [field: Tooltip("Arms: swing each arm at the shoulder so its shoulder-wrist line points where SMPL's does at rest; elbow and wrist angles stay copied. Clavicles: turn each clavicle about the vertical to SMPL's heading, moving the shoulder joint forward to where SMPL's sits. Read in Start.")]
         public LimbAims Aims { get; set; } = LimbAims.Arms | LimbAims.Clavicles;
 
-        /// <summary>Pin the target wrists to the source wrists with two-bone IK.</summary>
+        /// <summary>Pin the target wrists to their goals with two-bone IK.</summary>
         [field: SerializeField]
-        [field: Tooltip("Two-bone arm IK so the target's wrists reach the source's (controller-pinned) wrists despite different arm lengths. Bends the arm away from the source's joint angles; off keeps angles exact.")]
+        [field: Tooltip("Two-bone arm IK so the target's wrists reach their goals (Wrist Goal) despite different arm lengths. Bends the arm away from the source's joint angles; off keeps angles exact.")]
         public bool PinWrists { get; set; }
+
+        /// <summary>Where <see cref="PinWrists"/> puts the target wrists.</summary>
+        [field: SerializeField]
+        [field: Tooltip("Where Pin Wrists puts the wrists. Source: on the source's wrists, for the wearer's own body (its source wrists are on the controllers). Body Scaled: on the source's wrists moved onto the target's body, keeping the offset from the hips at hip height and from the eyes at eye height, so a body of other proportions keeps a hand on the lap on its lap and one at the face at its face.")]
+        public WristGoal WristGoal { get; set; } = WristGoal.Source;
 
         /// <summary>Share limb roll along the target's twist bones.</summary>
         [field: SerializeField]
@@ -74,8 +87,15 @@ namespace VrChat.Retarget
             {
                 foreach (var r in Source.GetComponentsInChildren<Renderer>()) r.enabled = false;
             }
+            var anchor = AnchorAt switch
+            {
+                RetargetAnchor.Eyes => _retarget.AnchorsEyes ? "eyes" : "head joint",
+                RetargetAnchor.Hips => "hip joints",
+                _ => "nothing",
+            };
             Debug.Log($"[SmplRetargeter] {Target.name}: {_retarget.JointCount} joints ({_retarget.AimedJointCount} limb bones aimed), " +
-                      $"{_retarget.TwistSegmentCount} twist segments, anchored by {(_retarget.AnchorsEyes ? "eyes" : "head joint")}.", this);
+                      $"{_retarget.TwistSegmentCount} twist segments, anchored by {anchor}" +
+                      $"{(PinWrists ? $", wrists pinned to {(WristGoal == WristGoal.BodyScaled ? "body-scaled goals" : "the source's")}" : "")}.", this);
         }
 
         void OnEnable() => Application.onBeforeRender += Retarget;
@@ -85,8 +105,9 @@ namespace VrChat.Retarget
         {
             if (_retarget == null) return; // before Start
             _retarget.PinWrists = PinWrists;
+            _retarget.WristGoal = WristGoal;
             _retarget.DistributeTwist = DistributeTwist;
-            _retarget.Anchor = AnchorEyes;
+            _retarget.AnchorAt = AnchorAt;
             _retarget.Offset = Offset;
             _retarget.Apply();
         }

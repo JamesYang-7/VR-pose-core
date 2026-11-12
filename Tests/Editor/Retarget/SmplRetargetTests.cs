@@ -98,6 +98,73 @@ namespace VrChat.Testing.Retarget
             Assert.That(actual, Has.All.LessThan(0.5f));
         }
 
+        // Seats the source in its rest frame: thighs level and forward, shins straight down, upper arms 15° forward of
+        // straight down and forearms pitched so the wrists sit 10 cm above the hip joints, on its lap.
+        Transform[] SeatSourceWithHandsOnLap()
+        {
+            var bones = new Transform[AnimUtils.boneNum];
+            AnimUtils.BindBones(_source.transform, ref bones);
+            var rest = Enumerable.Repeat(Quaternion.identity, AnimUtils.boneNum).ToArray();
+            AnimUtils.SetPose(ref bones, ref rest);
+            var up = bones[0].rotation * Vector3.up;
+            var lateral = (bones[1].position - bones[2].position).normalized;
+            var forward = Vector3.Cross(up, lateral).normalized;
+            if (Vector3.Dot(bones[10].position - bones[7].position, forward) < 0f) forward = -forward; // toes point forward
+
+            void Aim(int joint, int child, Vector3 direction) =>
+                bones[joint].rotation = Quaternion.FromToRotation(bones[child].position - bones[joint].position, direction) * bones[joint].rotation;
+
+            Aim(1, 4, forward);
+            Aim(2, 5, forward);
+            Aim(4, 7, -up);
+            Aim(5, 8, -up);
+            var upperArm = Vector3.Slerp(-up, forward, 15f / 90f);
+            var hips = (bones[1].position + bones[2].position) * 0.5f;
+            float elbowHeight = Vector3.Dot(bones[16].position - hips, up) + (bones[18].position - bones[16].position).magnitude * Vector3.Dot(upperArm, up);
+            float pitch = Mathf.Asin((elbowHeight - 0.1f) / (bones[20].position - bones[18].position).magnitude);
+            var forearm = forward * Mathf.Cos(pitch) - up * Mathf.Sin(pitch);
+            foreach (var (shoulder, elbow, wrist) in new[] { (16, 18, 20), (17, 19, 21) })
+            {
+                Aim(shoulder, elbow, upperArm);
+                Aim(elbow, wrist, forearm);
+            }
+            return bones;
+        }
+
+        static Vector3 Midpoint(Transform a, Transform b) => (a.position + b.position) * 0.5f;
+
+        [Test]
+        public void Apply_AnchorAtHips_PutsTheTargetHipJointsOnTheSources()
+        {
+            var source = SeatSourceWithHandsOnLap();
+            var animator = _target.GetComponentInChildren<Animator>();
+            var sut = new SmplRetarget(_source.transform, animator) { AnchorAt = RetargetAnchor.Hips };
+
+            sut.Apply();
+
+            var actual = Midpoint(animator.GetBoneTransform(HumanBodyBones.LeftUpperLeg), animator.GetBoneTransform(HumanBodyBones.RightUpperLeg));
+            Assert.That((actual - Midpoint(source[1], source[2])).magnitude, Is.LessThan(1e-4f));
+        }
+
+        [Test]
+        public void Apply_PinWristsToBodyScaledGoals_TargetWristsLandOnTheSourceWristsMovedOntoTheTargetTorso()
+        {
+            var source = SeatSourceWithHandsOnLap();
+            var animator = _target.GetComponentInChildren<Animator>();
+            var sut = new SmplRetarget(_source.transform, animator) { AnchorAt = RetargetAnchor.Hips, PinWrists = true, WristGoal = WristGoal.BodyScaled };
+
+            sut.Apply();
+
+            var sourceHips = Midpoint(source[1], source[2]);
+            var sourceEyes = Midpoint(AnimUtils.FindChildRecursive(_source.transform, "left_eye_smplhf"), AnimUtils.FindChildRecursive(_source.transform, "right_eye_smplhf"));
+            var targetHips = Midpoint(animator.GetBoneTransform(HumanBodyBones.LeftUpperLeg), animator.GetBoneTransform(HumanBodyBones.RightUpperLeg));
+            var targetEyes = Midpoint(animator.GetBoneTransform(HumanBodyBones.LeftEye), animator.GetBoneTransform(HumanBodyBones.RightEye));
+            // Metres from each target wrist to its goal; the arm IK is a few rounds of cyclic coordinate descent.
+            var actual = new[] { (HumanBodyBones.LeftHand, 20), (HumanBodyBones.RightHand, 21) }.Select(w =>
+                (animator.GetBoneTransform(w.Item1).position - TorsoMap.Point(source[w.Item2].position, sourceHips, sourceEyes, targetHips, targetEyes)).magnitude).ToArray();
+            Assert.That(actual, Has.All.LessThan(0.01f));
+        }
+
         [Test]
         public void Ctor_SourceFingersCurled_LeavesTheSourceFingersAsTheyWere()
         {

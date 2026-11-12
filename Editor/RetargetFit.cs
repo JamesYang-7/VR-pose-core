@@ -289,7 +289,7 @@ public static class RetargetFit
             }
 
             setup.EditBind?.Invoke(_animator);
-            var retarget = new SmplRetarget(_sourceGo.transform, _animator, setup.Aims) { Anchor = setup.AnchorEyes };
+            var retarget = new SmplRetarget(_sourceGo.transform, _animator, setup.Aims) { AnchorAt = setup.AnchorEyes ? RetargetAnchor.Eyes : RetargetAnchor.None };
             var hips = _animator.GetBoneTransform(HumanBodyBones.Hips);
             int cols = Columns.Length;
             var res = new float[FrameCount * cols];

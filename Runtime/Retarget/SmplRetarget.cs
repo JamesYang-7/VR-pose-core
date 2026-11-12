@@ -42,12 +42,18 @@ namespace VrChat.Retarget
     /// are SMPL-X's scaled to the target's knuckle span rather than the same angles from closer-set knuckles.</para>
     ///
     /// <para>Per <see cref="Apply"/>: rotations → finger spacing → (optional, off by default) two-bone IK pulling the
-    /// target wrists onto the source wrists, which trades joint angles for wrist position → twist
-    /// bones → move the hips so the target's eyes land on the source's eyes (a pure translation,
-    /// angles untouched). Eyes, not head joints: the headset sits on the eyes, and each template puts
+    /// target wrists onto their goals (<see cref="WristGoal"/>), which trades joint angles for wrist position → twist
+    /// bones → move the hips so the target's anchor point lands on the source's (<see cref="AnchorAt"/>; a pure
+    /// translation, angles untouched). By default the eyes: the headset sits on the eyes, and each template puts
     /// its head joint somewhere different inside the skull (SMPL-X 4.5 cm below the eyes, the CC5
     /// Aaron 8.5 cm), so a head-joint anchor shifts the whole body by the difference. A rig without
     /// eye bones falls back to the head joint.</para>
+    ///
+    /// <para>A body seen from outside (a bot) whose torso differs from SMPL-X's anchors at the hips instead, with the
+    /// wrists pinned to <see cref="VrChat.Retarget.WristGoal.BodyScaled"/> goals. The CC5 Ariana, a stock female body,
+    /// has SMPL-X's leg length within 1 cm but a torso 15 cm shorter from the hips to the eyes. Eye-anchored and seated,
+    /// her hips and feet floated 15 cm above SMPL-X's, and with the joint angles copied her wrists landed 9.5 cm lower
+    /// relative to her hips than SMPL-X's: into her thighs when its hands rest on its lap.</para>
     ///
     /// <para>Calibrates on construction, which requires the target to be in its bind pose and that
     /// bind to be a T-pose: the SMPL zero pose (the canonical T-pose) and the target bind are taken
@@ -93,19 +99,30 @@ namespace VrChat.Retarget
         readonly int _leftHandJoint = -1, _rightHandJoint = -1;
         const int kLeftCollar = 13, kRightCollar = 14;
 
-        /// <summary>Two-bone IK pulling the target wrists onto the source wrists (bends the arms away from the source's angles).</summary>
+        /// <summary>Two-bone IK pulling the target wrists onto their <see cref="WristGoal"/> (bends the arms away from the source's angles).</summary>
         public bool PinWrists { get; set; }
+
+        /// <summary>Where <see cref="PinWrists"/> puts the target wrists.</summary>
+        public WristGoal WristGoal { get; set; } = WristGoal.Source;
 
         /// <summary>Share each limb's roll along the target's twist bones.</summary>
         public bool DistributeTwist { get; set; } = true;
 
-        /// <summary>Move the target so its eyes (or head joint, see <see cref="AnchorsEyes"/>) land on the source's.</summary>
-        public bool Anchor { get; set; } = true;
+        /// <summary>Which point of the target is moved onto the source's each frame, if any.</summary>
+        public RetargetAnchor AnchorAt { get; set; } = RetargetAnchor.Eyes;
 
-        /// <summary>World offset added to the anchor and the wrist goals, e.g. to stand the target beside the source.</summary>
+        /// <summary>Move the target so its eyes (or head joint, see <see cref="AnchorsEyes"/>) land on the source's.</summary>
+        [Obsolete("Use AnchorAt: true is RetargetAnchor.Eyes (or keeps another anchor), false is RetargetAnchor.None.")]
+        public bool Anchor
+        {
+            get => AnchorAt != RetargetAnchor.None;
+            set => AnchorAt = !value ? RetargetAnchor.None : AnchorAt == RetargetAnchor.None ? RetargetAnchor.Eyes : AnchorAt;
+        }
+
+        /// <summary>World offset added to the anchor and the source-wrist goals, e.g. to stand the target beside the source.</summary>
         public Vector3 Offset { get; set; }
 
-        /// <summary>True when both rigs have eye bones, so the anchor is eyes-on-eyes rather than head joint on head joint.</summary>
+        /// <summary>True when both rigs have eye bones, so the eye anchor is eyes-on-eyes rather than head joint on head joint.</summary>
         public bool AnchorsEyes => _srcEyes != null;
 
         /// <summary>Number of target bones whose rest was re-aimed along SMPL's (6 for <see cref="LimbAims.Arms"/>, 2 for <see cref="LimbAims.Clavicles"/>).</summary>
@@ -114,11 +131,23 @@ namespace VrChat.Retarget
         public int JointCount => _solver.JointCount;
         public int TwistSegmentCount => _twists.Count;
 
-        /// <summary>The source's anchor point: its eye midpoint, or its head joint.</summary>
-        public Vector3 SourceAnchorPosition => _srcEyes?.EyesPosition ?? _src[kHead].position;
+        /// <summary>
+        /// The source's anchor point: its hip-joint midpoint for <see cref="RetargetAnchor.Hips"/>, otherwise its eye
+        /// midpoint, or its head joint.
+        /// </summary>
+        public Vector3 SourceAnchorPosition => AnchorAt == RetargetAnchor.Hips ? HipJoints(_src) : SourceEyes;
 
-        /// <summary>The target's anchor point: its eye midpoint, or its head bone.</summary>
-        public Vector3 TargetAnchorPosition => _tgtEyes?.EyesPosition ?? _tgt[kHead].position;
+        /// <summary>
+        /// The target's anchor point: its hip-joint midpoint for <see cref="RetargetAnchor.Hips"/>, otherwise its eye
+        /// midpoint, or its head bone.
+        /// </summary>
+        public Vector3 TargetAnchorPosition => AnchorAt == RetargetAnchor.Hips ? HipJoints(_tgt) : TargetEyes;
+
+        Vector3 SourceEyes => _srcEyes?.EyesPosition ?? _src[kHead].position;
+        Vector3 TargetEyes => _tgtEyes?.EyesPosition ?? _tgt[kHead].position;
+
+        // Both hip joints are required Humanoid bones and SMPL joints, so neither rig lacks them.
+        static Vector3 HipJoints(Transform[] rig) => (rig[kLeftHip].position + rig[kRightHip].position) * 0.5f;
 
         /// <param name="source">Root of the posed SMPL avatar; its bones are found by name (<see cref="AnimUtils.BindBones"/>).</param>
         /// <param name="target">Humanoid Animator of the character that receives the pose, in its bind pose.</param>
@@ -325,7 +354,7 @@ namespace VrChat.Retarget
 
             if (PinWrists)
             {
-                var shift = Anchor ? SourceAnchorPosition + Offset - TargetAnchorPosition : Vector3.zero;
+                var shift = AnchorAt != RetargetAnchor.None ? SourceAnchorPosition + Offset - TargetAnchorPosition : Vector3.zero;
                 PinWrist(kLeftShoulder, kLeftElbow, kLeftWrist, _leftHandJoint, shift);
                 PinWrist(kRightShoulder, kRightElbow, kRightWrist, _rightHandJoint, shift);
             }
@@ -335,15 +364,20 @@ namespace VrChat.Retarget
                 foreach (var t in _twists) t.Apply();
             }
 
-            if (Anchor)
+            if (AnchorAt != RetargetAnchor.None)
                 _tgt[kPelvis].position += SourceAnchorPosition + Offset - TargetAnchorPosition;
         }
 
-        // Solved before the anchor moves the body, so the goal is taken back by that shift.
+        // Solved before the anchor moves the body. A source-wrist goal is therefore taken back by that shift. A
+        // body-scaled goal is built from the target's own hips and eyes as they stand now, so it moves with the body
+        // and needs no shift. The arm IK leaves both the hips and the eyes where they are.
         void PinWrist(int shoulder, int elbow, int wrist, int handJoint, Vector3 shift)
         {
             if (_tgt[shoulder] == null || _tgt[elbow] == null || _tgt[wrist] == null || handJoint < 0) return;
-            AnimUtils.SolveTwoBoneIK(_tgt[shoulder], _tgt[elbow], _tgt[wrist], _src[wrist].position + Offset - shift);
+            var goal = WristGoal == WristGoal.BodyScaled
+                ? TorsoMap.Point(_src[wrist].position, HipJoints(_src), SourceEyes, HipJoints(_tgt), TargetEyes)
+                : _src[wrist].position + Offset - shift;
+            AnimUtils.SolveTwoBoneIK(_tgt[shoulder], _tgt[elbow], _tgt[wrist], goal);
             _solver.Apply(handJoint); // IK turned the hand with the arm; restore its orientation
         }
     }

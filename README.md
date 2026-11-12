@@ -15,7 +15,10 @@ controllers in, a 22-joint SMPL body out), shared by the projects built on it.
   XR input from the live rig, a recording (`RecordedXrInput`, `VrInputRecorder`), a simulation or a GORP capture.
 - **Conversions and data**: SMPL (Z-up) ↔ Unity (`MathUtils`, `GorpPose`), `.npy` / `.npz` readers and writer.
 - **Body placement**: `EyeAnchor`, rig calibration (`RigCalibration`, `RigCalibrator`), SMPL → character
-  retargeting (`Runtime/Retarget/`).
+  retargeting (`Runtime/Retarget/`). `SmplRetargeter` places the character by its eyes for the wearer's own body
+  (`AnchorAt = Eyes`, the default). A body seen from outside whose proportions differ from SMPL-X's goes by its
+  hips instead (`AnchorAt = Hips`), with its wrists pinned to `WristGoal.BodyScaled` goals (`TorsoMap`), so it
+  keeps its seat and its hands on its lap.
 - **Lip sync**: NVIDIA Audio2Face through a native plugin, and Oculus visemes mixed into CC visemes (the
   component that reads Oculus LipSync, `CcVisemeDriver`, stays in the projects, next to that install).
 - **Tools**: `XrAutoStart`, the pipeline perf HUD, skeleton and axis debug views, a mirror avatar, the GORP clip
