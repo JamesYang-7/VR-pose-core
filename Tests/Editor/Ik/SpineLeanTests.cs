@@ -50,6 +50,55 @@ namespace VrChat.Testing
                 Assert.That(Quaternion.Angle(before[i], after[i]), Is.LessThan(0.01f), $"joint {i}");
         }
 
+        // From the head (m): a drift forward and down, 0.2 mm a frame; a rise straight up through the spine's furthest
+        // reach, 0.1 mm a frame (sitting up tall); and a slouch, the head coming nearer the hips.
+        [TestCase(0f, -0.01f, 0.03f, 0f, -0.0001f, 0.0002f, 150, TestName = "Reach_TargetDriftsSmoothly_SpineTurnsSmoothly")]
+        [TestCase(0f, -0.02f, 0.005f, 0f, 0.0001f, 0f, 400, TestName = "Reach_TargetRisesThroughFullReach_SpineTurnsSmoothly")]
+        [TestCase(0f, 0f, 0.02f, 0f, -0.0002f, 0.0001f, 400, TestName = "Reach_TargetSlouches_SpineTurnsSmoothly")]
+        public void Reach_TargetMovesSmoothly_SpineTurnsSmoothly(float x0, float y0, float z0, float dx, float dy, float dz, int frames)
+        {
+            var rig = SeatedRig();
+            var chain = new[] { rig.Pelvis, rig.Spine[0], rig.Spine[1], rig.Spine[2] };
+            // Reach turns the hips back as the pelvis tips, so they are re-posed too.
+            var posed = new[] { rig.Pelvis, rig.LeftHip, rig.RightHip, rig.Spine[0], rig.Spine[1], rig.Spine[2], rig.Spine[3] };
+            var startLocal = System.Array.ConvertAll(posed, t => t.localRotation);
+            var startRoot = rig.Root.position;
+            var head = rig.Head.position;
+            var turns = new float[frames][];
+            Quaternion[] first = null;
+
+            // As a seated body is re-posed from the worker's pose each frame: the same start, the target a step on.
+            for (var f = 0; f < turns.Length; f++)
+            {
+                for (var i = 0; i < posed.Length; i++) posed[i].localRotation = startLocal[i];
+                rig.Root.position = startRoot;
+                SpineLean.Reach(rig.Root, rig.Pelvis, rig.LeftHip, rig.RightHip, rig.Spine, rig.Head,
+                    head + new Vector3(x0 + dx * f, y0 + dy * f, z0 + dz * f));
+                var now = System.Array.ConvertAll(chain, t => t.rotation);
+                first ??= now;
+                turns[f] = new float[chain.Length];
+                for (var j = 0; j < chain.Length; j++) turns[f][j] = Turn(first[j], now[j]);
+            }
+
+            // Each joint's change of step from one frame to the next (degrees). Stopping the rounds within 1 mm made
+            // a joint stand still and then turn ~0.2 degrees in one frame, ten times its steady step. Matching the
+            // head's distance from the hips exactly swung the curl and the pelvis by degrees a frame near a straight
+            // spine, where curling hardly changes that distance.
+            var worst = 0f;
+            for (var f = 1; f + 1 < turns.Length; f++)
+                for (var j = 0; j < chain.Length; j++)
+                    worst = Mathf.Max(worst, Mathf.Abs(turns[f + 1][j] - 2f * turns[f][j] + turns[f - 1][j]));
+            Assert.That(worst, Is.LessThan(0.1f));
+        }
+
+        // Degrees from a to b, from the relative rotation's vector part: exact for small angles, where Quaternion.Angle
+        // (an arccos near 1) is only good to ~0.03 degrees.
+        static float Turn(Quaternion a, Quaternion b)
+        {
+            var r = Quaternion.Inverse(a) * b;
+            return 2f * Mathf.Asin(Mathf.Min(1f, new Vector3(r.x, r.y, r.z).magnitude)) * Mathf.Rad2Deg;
+        }
+
         [Test]
         public void Reach_TargetOutOfReach_PutsTheHeadOnTheLineFromTheHipsToIt()
         {

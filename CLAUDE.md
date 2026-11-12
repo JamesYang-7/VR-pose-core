@@ -55,6 +55,14 @@ avatar, the grip offsets and corrections, `HasPose`, and the controllers' wrist 
 Both put the eyes on the headset and the wrists on the controllers, so scripts that place or re-pose the body (a
 mirror, a seat, a retargeter) should take a `LiveWorker`.
 
+A model worker shows its results on the model's own clock (`PoseTimeline`): each at the time of the tick its input
+was sampled at, displayed one model frame plus the step's latency later and interpolated in between, so the body
+moves at a steady speed however the results' arrivals fall against the display's frames. Anything that re-poses
+the body every frame must change its output smoothly with its inputs too: a solver that stops at a tolerance
+jumps whenever one more iteration is needed, and one that meets its target exactly near a singularity swings by
+degrees for a sub-millimetre change. So `SpineLean` runs a fixed number of rounds and damps its curl, which near a
+straight spine hardly changes the head's distance from the hips.
+
 `IkBody` starts from the rest pose each frame; the legs stay straight. The heading follows the head past a dead zone.
 The pelvis keeps its first-frame height and follows the eyes past a radius. `SpineLean` (weighted shares) leans the
 spine to the eyes. Each collar shrugs on long reaches. `TwoBoneIk` (closed form, about the rest hinge) bends each

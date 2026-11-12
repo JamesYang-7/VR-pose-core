@@ -16,11 +16,12 @@ using VrChat;
 /// (<see cref="IPoseStepRunner.Begin"/>). The result is collected on a later frame without blocking, so the
 /// main thread pays only for the scheduling, not for the GPU.</para>
 ///
-/// <para>Every rendered frame the avatar shows the model's pose, interpolated between its last two
-/// results when <see cref="SmoothPose"/> is on (one model frame, 33 ms, of extra delay; off shows each
-/// result as it arrives). The body is then moved so its eyes land on the headset (<see cref="EyeAnchor"/>), and
-/// the wrists can be IK-pinned to the live wrist estimates, so head and hands follow the tracking at the display
-/// rate.</para>
+/// <para>Every rendered frame the avatar shows the model's pose. With <see cref="SmoothPose"/> on, the pose is
+/// interpolated on the model's own clock (<see cref="PoseTimeline"/>): each result at the time of the tick its input
+/// was sampled at, shown one model frame (33 ms) plus the step's latency later, so the body moves at a steady speed
+/// whenever results arrive. Off shows each result as it arrives. The body is then moved so its eyes land on the
+/// headset (<see cref="EyeAnchor"/>), and the wrists can be IK-pinned to the live wrist estimates, so head and hands
+/// follow the tracking at the display rate.</para>
 ///
 /// <para>The rest skeleton the model needs (<c>joints_rest</c>) is read from the avatar itself
 /// (<see cref="GorpPose.RestJoints"/>), and the rollout starts from the model's standing seed. The tracking origin
@@ -45,7 +46,7 @@ public abstract class PoseLiveWorker : LiveWorker
 
     /// <summary>Interpolate between the model's last two poses at the display rate.</summary>
     [field: SerializeField]
-    [field: Tooltip("Blend between the model's last two poses every rendered frame: smooth at any display rate, one model frame (33 ms) later. Off: each pose shows as it arrives (30 Hz steps).")]
+    [field: Tooltip("Interpolate the model's poses on its own clock every rendered frame: a steady speed at any display rate, one model frame (33 ms) plus the step's latency later. Off: each pose shows as it arrives (30 Hz steps).")]
     public bool SmoothPose { get; set; } = true;
 
     /// <inheritdoc/>
@@ -91,10 +92,12 @@ public abstract class PoseLiveWorker : LiveWorker
     bool _hasLastPoses;
     float _sinceTick;
 
-    // The model's last two poses (rig-local rotations, pelvis in Unity world) and when the newer arrived.
-    Quaternion[] _fromPose, _toPose, _shownPose;
-    Vector3 _fromPelvis, _toPelvis, _shownPelvis;
-    float _poseAge;
+    // The model's results on its clock (rig-local rotations, pelvis in Unity world), the game time of each scheduled
+    // step's tick until its result arrives, and the pose shown this frame.
+    PoseTimeline _timeline;
+    readonly System.Collections.Generic.Queue<float> _pendingTicks = new();
+    Quaternion[] _result, _shownPose;
+    Vector3 _shownPelvis;
     bool _hasPose;
 
     void Start()
@@ -130,8 +133,8 @@ public abstract class PoseLiveWorker : LiveWorker
         }
         _input = CreateInputProcessor();
         _tick = 1f / ModelFps;
-        _fromPose = new Quaternion[PoseLayout.Joints];
-        _toPose = new Quaternion[PoseLayout.Joints];
+        _timeline = new PoseTimeline(PoseLayout.Joints, _tick);
+        _result = new Quaternion[PoseLayout.Joints];
         _shownPose = new Quaternion[PoseLayout.Joints];
     }
 
@@ -173,12 +176,13 @@ public abstract class PoseLiveWorker : LiveWorker
             _tickPoses[0] = Lerp(_lastPoses[0], head, t);
             _tickPoses[1] = Lerp(_lastPoses[1], left, t);
             _tickPoses[2] = Lerp(_lastPoses[2], right, t);
-            Tick();
+            Tick(Time.time - (1f - t) * dt);
         }
         _lastPoses[0] = head; _lastPoses[1] = left; _lastPoses[2] = right;
     }
 
-    void Tick()
+    // tickTime: the game time the input frame was sampled at, between the last rendered frame and this one.
+    void Tick(float tickTime)
     {
         for (int d = 0; d < GorpDevice.Points; d++)
             GorpDevice.FromUnity(_tickPoses[d].position, _tickPoses[d].rotation, 1f, _raw, d * GorpDevice.RawWidth);
@@ -196,36 +200,24 @@ public abstract class PoseLiveWorker : LiveWorker
             _runner.Complete();
             TakeResult();
         }
-        _runner.Begin(_frame); // false while the model is still filling its input window (RPM: 10 frames)
+        // False while the model is still filling its input window (RPM: 10 frames): no result will come for this tick.
+        if (_runner.Begin(_frame)) _pendingTicks.Enqueue(tickTime);
     }
 
-    // The newest model pose becomes the blend target, starting from what is on screen now (so a result that
-    // arrives before the last blend finished does not jump).
+    // The newest model pose goes on the timeline at its tick's time. Steps complete in the order they were scheduled.
     void TakeResult()
     {
-        GorpPose.RotationsFromMatrices(_runner.JointRotations, _toPose);
-        _toPelvis = GorpPose.ToUnity(GorpSequence.JointPosition(_runner.MotionOut, 0, 0));
-        if (_hasPose)
-        {
-            System.Array.Copy(_shownPose, _fromPose, _shownPose.Length);
-            _fromPelvis = _shownPelvis;
-        }
-        else
-        {
-            System.Array.Copy(_toPose, _fromPose, _toPose.Length);
-            _fromPelvis = _toPelvis;
-            _hasPose = true;
-        }
-        _poseAge = 0f;
+        var tickTime = _pendingTicks.Count > 0 ? _pendingTicks.Dequeue() : Time.time;
+        GorpPose.RotationsFromMatrices(_runner.JointRotations, _result);
+        _timeline.Add(tickTime, Time.time, _result, GorpPose.ToUnity(GorpSequence.JointPosition(_runner.MotionOut, 0, 0)));
+        _hasPose = true;
     }
 
     // Pose the avatar, put its eyes on the headset, then pin the wrists.
     void ShowPose()
     {
-        _poseAge += Time.deltaTime;
-        float a = SmoothPose ? Mathf.Clamp01(_poseAge / _tick) : 1f;
-        for (int j = 0; j < _shownPose.Length; j++) _shownPose[j] = Quaternion.Slerp(_fromPose[j], _toPose[j], a);
-        _shownPelvis = Vector3.Lerp(_fromPelvis, _toPelvis, a);
+        if (SmoothPose) _timeline.Sample(Time.time, _shownPose, out _shownPelvis);
+        else _timeline.Newest(_shownPose, out _shownPelvis);
         GorpPose.Apply(_bones, _shownPose, _shownPelvis);
         _rootBone.position += Head.position - _eyes.EyesPosition;
 
